@@ -19,15 +19,9 @@ import net.minecraft.util.math.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class AIBuilderMod implements ModInitializer {
-    private static final String BRIDGE_BASE = "http://localhost:5001";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Logger LOGGER = LoggerFactory.getLogger("ai-builder-mod");
 
@@ -65,6 +59,18 @@ public class AIBuilderMod implements ModInitializer {
                             player.sendMessage(Text.literal("§b[AI] " + player.getName().getString()
                                     + " asked: " + prompt), false);
                             sendToBridge(player, prompt, terrain);
+                            return 1;
+                        })));
+
+        aiCmd.then(CommandManager.literal("mini")
+                .then(CommandManager.argument("prompt", StringArgumentType.greedyString())
+                        .executes(context -> {
+                            ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) return 0;
+                            String prompt = StringArgumentType.getString(context, "prompt");
+                            player.sendMessage(Text.literal("§b[AI] " + player.getName().getString()
+                                    + " asked: " + prompt + " §7(mini mode, no terrain)"), false);
+                            sendMiniToBridge(player, prompt);
                             return 1;
                         })));
 
@@ -252,14 +258,7 @@ public class AIBuilderMod implements ModInitializer {
 
     private void fetchModels(ServerPlayerEntity player) {
         String key = config.apiKeys.getOrDefault(config.selectedProvider, "");
-        HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BRIDGE_BASE + "/list-models?provider=" + config.selectedProvider + "&api_key=" + key))
-                .GET()
-                .build();
-
-        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenApply(HttpResponse::body)
+        AiBridge.listModels(config.selectedProvider, key)
                 .thenAccept(response -> player.getEntityWorld().getServer().execute(() -> {
                     try {
                         JsonArray models = GSON.fromJson(response, JsonArray.class);
@@ -280,7 +279,8 @@ public class AIBuilderMod implements ModInitializer {
                     }
                 }))
                 .exceptionally(ex -> {
-                    player.sendMessage(Text.literal("§c[AI] Cannot reach bridge."), false);
+                    player.getEntityWorld().getServer().execute(() ->
+                            player.sendMessage(Text.literal("§c[AI] Error: " + ex.getMessage()), false));
                     return null;
                 });
     }
@@ -355,6 +355,7 @@ public class AIBuilderMod implements ModInitializer {
     private void showHelp(ServerPlayerEntity player) {
         player.sendMessage(Text.literal("§b===== AI Builder Mod Commands ====="), false);
         player.sendMessage(Text.literal("§e/ai make <prompt> §7- Build or do anything"), false);
+        player.sendMessage(Text.literal("§e/ai mini <prompt> §7- Light mode (no terrain, reduces token usage)"), false);
         player.sendMessage(Text.literal("§e/ai chat <message> §7- Chat with AI (has memory)"), false);
         player.sendMessage(Text.literal("§e/ai chat toggle §7- Toggle AI chat responses on/off"), false);
         player.sendMessage(Text.literal("§e/ai provider <name> §7- Switch provider"), false);
@@ -371,21 +372,13 @@ public class AIBuilderMod implements ModInitializer {
         player.sendMessage(Text.literal("§7Chat responses: §" + (config.chatEnabled ? "aON" : "cOFF")), false);
     }
 
-    // ---- Bridge call (make) ----
+    // ---- AI Bridge calls ----
 
     private void sendToBridge(ServerPlayerEntity player, String prompt, String terrainData) {
-        HttpClient client = HttpClient.newHttpClient();
-
-        JsonObject payload = buildBasePayload(player, prompt, terrainData);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BRIDGE_BASE + "/generate-build"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
-                .build();
-
-        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenApply(HttpResponse::body)
+        AiBridge.generateBuild(player.getUuidAsString(), prompt, terrainData,
+                        config.selectedModel, player.getName().getString(), config.selectedProvider,
+                        config.apiKeys.getOrDefault(config.selectedProvider, ""),
+                        player.getBlockX(), player.getBlockY(), player.getBlockZ(), false)
                 .thenAccept(response -> {
                     if (response == null || response.isBlank()) return;
                     LOGGER.info("AI raw response:\n{}", response);
@@ -398,32 +391,40 @@ public class AIBuilderMod implements ModInitializer {
                     });
                 })
                 .exceptionally(ex -> {
-                    player.sendMessage(Text.literal("§c[AI] Cannot reach bridge."), false);
+                    player.getEntityWorld().getServer().execute(() ->
+                            player.sendMessage(Text.literal("§c[AI] Error: " + ex.getMessage()), false));
                     return null;
                 });
     }
 
-    // ---- Bridge call (chat) ----
+    private void sendMiniToBridge(ServerPlayerEntity player, String prompt) {
+        AiBridge.generateBuild(player.getUuidAsString(), prompt, "[]",
+                        config.selectedModel, player.getName().getString(), config.selectedProvider,
+                        config.apiKeys.getOrDefault(config.selectedProvider, ""),
+                        player.getBlockX(), player.getBlockY(), player.getBlockZ(), true)
+                .thenAccept(response -> {
+                    if (response == null || response.isBlank()) return;
+                    LOGGER.info("AI mini raw response:\n{}", response);
+                    player.getEntityWorld().getServer().execute(() -> {
+                        try {
+                            processAiResponse(player, response, prompt, 0);
+                        } catch (Exception e) {
+                            player.sendMessage(Text.literal("§c[AI] Error: " + e.getMessage()), false);
+                        }
+                    });
+                })
+                .exceptionally(ex -> {
+                    player.getEntityWorld().getServer().execute(() ->
+                            player.sendMessage(Text.literal("§c[AI] Error: " + ex.getMessage()), false));
+                    return null;
+                });
+    }
 
     private void sendChatToBridge(ServerPlayerEntity player, String message) {
-        HttpClient client = HttpClient.newHttpClient();
-
-        JsonObject payload = new JsonObject();
-        payload.addProperty("session_id", player.getUuidAsString());
-        payload.addProperty("message", message);
-        payload.addProperty("model", config.selectedModel);
-        payload.addProperty("player_name", player.getName().getString());
-        payload.addProperty("provider", config.selectedProvider);
-        payload.addProperty("api_key", config.apiKeys.getOrDefault(config.selectedProvider, ""));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BRIDGE_BASE + "/chat"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
-                .build();
-
-        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenApply(HttpResponse::body)
+        AiBridge.chat(player.getUuidAsString(), message,
+                        config.selectedModel, player.getName().getString(), config.selectedProvider,
+                        config.apiKeys.getOrDefault(config.selectedProvider, ""),
+                        player.getBlockX(), player.getBlockY(), player.getBlockZ())
                 .thenAccept(response -> {
                     if (response == null || response.isBlank()) return;
                     LOGGER.info("AI chat raw response:\n{}", response);
@@ -436,26 +437,10 @@ public class AIBuilderMod implements ModInitializer {
                     });
                 })
                 .exceptionally(ex -> {
-                    player.sendMessage(Text.literal("§c[AI] Cannot reach bridge."), false);
+                    player.getEntityWorld().getServer().execute(() ->
+                            player.sendMessage(Text.literal("§c[AI] Error: " + ex.getMessage()), false));
                     return null;
                 });
-    }
-
-    // ---- Build base payload ----
-
-    private JsonObject buildBasePayload(ServerPlayerEntity player, String prompt, String terrainData) {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("session_id", player.getUuidAsString());
-        payload.addProperty("prompt", prompt);
-        payload.addProperty("terrain", terrainData);
-        payload.addProperty("player_x", player.getBlockX());
-        payload.addProperty("player_y", player.getBlockY());
-        payload.addProperty("player_z", player.getBlockZ());
-        payload.addProperty("model", config.selectedModel);
-        payload.addProperty("player_name", player.getName().getString());
-        payload.addProperty("provider", config.selectedProvider);
-        payload.addProperty("api_key", config.apiKeys.getOrDefault(config.selectedProvider, ""));
-        return payload;
     }
 
     // ---- Process AI response (with optional follow-up loop) ----
@@ -492,32 +477,10 @@ public class AIBuilderMod implements ModInitializer {
                                               List<CommandCapture.CapturedOutput> outputs,
                                               int depth,
                                               AIActionExecutor.ActionResult previousResult) {
-        HttpClient client = HttpClient.newHttpClient();
-
-        JsonObject payload = new JsonObject();
-        payload.addProperty("session_id", player.getUuidAsString());
-        payload.addProperty("model", config.selectedModel);
-        payload.addProperty("player_name", player.getName().getString());
-        payload.addProperty("provider", config.selectedProvider);
-        payload.addProperty("api_key", config.apiKeys.getOrDefault(config.selectedProvider, ""));
-
-        JsonArray outputsArr = new JsonArray();
-        for (CommandCapture.CapturedOutput o : outputs) {
-            JsonObject obj = new JsonObject();
-            obj.addProperty("command", o.command);
-            obj.addProperty("output", o.output);
-            outputsArr.add(obj);
-        }
-        payload.add("command_outputs", outputsArr);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BRIDGE_BASE + "/command-result"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
-                .build();
-
-        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenApply(HttpResponse::body)
+        AiBridge.commandResult(player.getUuidAsString(), config.selectedModel,
+                        player.getName().getString(), config.selectedProvider,
+                        config.apiKeys.getOrDefault(config.selectedProvider, ""),
+                        player.getBlockX(), player.getBlockY(), player.getBlockZ(), outputs)
                 .thenAccept(response -> {
                     if (response == null || response.isBlank()) {
                         player.getEntityWorld().getServer().execute(() ->
@@ -530,9 +493,10 @@ public class AIBuilderMod implements ModInitializer {
                     });
                 })
                 .exceptionally(ex -> {
-                    player.sendMessage(Text.literal("§c[AI] Follow-up error: " + ex.getMessage()), false);
-                    player.getEntityWorld().getServer().execute(() ->
-                            finishBuild(player, previousResult, ""));
+                    player.getEntityWorld().getServer().execute(() -> {
+                        player.sendMessage(Text.literal("§c[AI] Follow-up error: " + ex.getMessage()), false);
+                        finishBuild(player, previousResult, "");
+                    });
                     return null;
                 });
     }

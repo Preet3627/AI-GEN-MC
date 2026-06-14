@@ -29,6 +29,7 @@ PROVIDER_CONFIGS = {
     "ollama": {
         "base": os.getenv("OLLAMA_BASE", "http://localhost:11434"),
         "generate_path": "/api/generate",
+        "chat_path": "/api/chat",
         "models_path": "/api/tags",
         "api_type": "ollama",
     },
@@ -177,6 +178,13 @@ SYSTEM_PROMPT = (
     f"Available templates:\n{_TEMPLATE_LIST}\n\n"
     f"If the player asks for a structure that matches a template, check its instructions "
     f"and build it.\n\n"
+    "=== COORDINATES ===\n"
+    "- The player's position (player_x, player_y, player_z) is given in the request.\n"
+    "- All block coordinates in your response are RELATIVE to the player.\n"
+    "  - x=0, y=0, z=0 is the block the player is standing on (at their feet).\n"
+    "  - x=right, z=forward, y=up.\n"
+    "- Example: If player is at (100, 64, 200) and you want to place a block\n"
+    "  at world (105, 74, 200), use x=5, y=10, z=0.\n\n"
     "=== BUILDING GUIDELINES ===\n"
     "- For walls: place blocks in a rectangle, 3-4 blocks high\n"
     "- For roofs: use slabs or stairs on top of walls\n"
@@ -187,35 +195,68 @@ SYSTEM_PROMPT = (
     "- For furniture: place a few blocks inside (furnace, chest, crafting_table)\n"
     "- A simple 5x5x3 house needs about 40-50 blocks\n"
     "- Use cobblestone for foundations, oak_planks for walls\n"
-    "- If terrain has water, build on stilts or use glass for underwater sections\n\n"
+    "- If terrain has water, build on stilts or use glass for underwater sections\n"
+    "- When building a structure on the ground, start at y=0 (ground level) going up.\n\n"
+    "=== WRITING TEXT WITH BLOCKS ===\n"
+    "- When the player asks you to write text, their name, or a message with blocks,\n"
+    "  use the 'blocks' field (NOT signs).\n"
+    "- Place blocks at y=10 to y=12 so the text appears at the player's eye level.\n"
+    "- Each letter should be about 5 blocks tall and 3-4 blocks wide.\n"
+    "- Use a contrasting color like black_concrete, red_wool, or white_wool.\n"
+    "- Example for name 'HI' at relative y=11 (11 blocks above player's feet):\n"
+    "  {\n"
+    '    "chat": "Writing your name!",\n'
+    "    \"blocks\": [\n"
+    '      {"x":0,"y":11,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":0,"y":12,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":0,"y":13,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":0,"y":14,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":0,"y":15,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":3,"y":11,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":3,"y":12,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":3,"y":13,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":3,"y":14,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":3,"y":15,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":1,"y":13,"z":0,"id":"minecraft:white_wool"},\n'
+    '      {"x":2,"y":13,"z":0,"id":"minecraft:white_wool"}\n'
+    "    ]\n"
+    "  }\n\n"
     "=== COMMAND CAPTURE WORKFLOW ===\n"
     "You can run Minecraft commands and SEE their output to make decisions:\n"
     "  1. Use capture=true on commands like /locate, /seed, /time query, /getpos\n"
     "  2. The command output will be shown back to you automatically\n"
     "  3. You can then use that info in follow-up commands (e.g., teleport to found coordinates)\n\n"
-    "Example: Player asks 'teleport me to a village'\n"
-    "  Step 1 (your response):\n"
-    '    {"chat": "Searching for a village...", "commands": [{"cmd": "/locate structure village", "capture": true, "desc": "Find nearest village"}]}\n'
-    "  Step 2 (after seeing output like 'Village at [123, 64, 456]'):\n"
-    '    {"chat": "Found a village! Teleporting you now.", "commands": [{"cmd": "/tp @p 123 64 456", "confirm": true, "desc": "Teleport to village"}]}\n\n'
+    "TELEPORT EXAMPLE:\n"
+    "When the player asks to teleport somewhere, ALWAYS use capture=true to get coordinates:\n\n"
+    'Player: "teleport me to the nearest village"\n'
+    'Your Step 1 response: {"chat": "Locating nearest village...", "commands": [{"cmd": "/locate structure village", "capture": true, "confirm": false, "desc": "Find nearest village"}]}\n'
+    "(NOTE: capture=true is REQUIRED so the command output comes back to you!)\n"
+    "  After that, you'll see the output like 'Village at [123, 64, 456]'\n"
+    'Your Step 2 response: {"chat": "Found a village! Teleporting you now.", "commands": [{"cmd": "/tp @p 123 64 456", "confirm": true, "desc": "Teleport to nearest village"}]}\n\n'
     "=== RULES ===\n"
     "- Output ONLY valid JSON. No markdown, no code fences.\n"
     "- Always include a 'chat' field with a friendly message.\n"
     "- Blocks, commands, signs etc. are OPTIONAL — only include what's needed.\n"
     "- For simple chat (no blocks/commands), just send: {\"chat\": \"your message\"}\n"
-    "- Remember past conversations with the player.\n"
-    "- Coordinates are RELATIVE to the player. x=right, z=forward, y=up."
+    "- Remember past conversations with the player."
 )
 
 # -------------------------------------------------------------------
 # Helpers
 # -------------------------------------------------------------------
+def _strip_json_comments(text: str) -> str:
+    import re
+    text = re.sub(r'//.*', '', text)
+    text = re.sub(r'/\*[\s\S]*?\*/', '', text)
+    return text
+
 def _clean_response(text: str) -> str:
     text = text.strip()
     if text.startswith("...") or text.startswith("```"):
         text = text.split("```")[-1]
     if "```" in text:
         text = text.split("```json")[-1].split("```")[0] if "```json" in text else text.split("```")[-1]
+    text = _strip_json_comments(text)
     return text.strip()
 
 BLOCK_NAME_CORRECTIONS = {
@@ -251,8 +292,8 @@ def _fix_block_ids(obj):
 # --- Ollama ---
 async def _ollama_generate(prompt: str, system: str, model: str, session, cfg: dict,
                            api_key: str = "", messages: list = None) -> str:
-    url = f"{cfg['base']}{cfg['generate_path']}"
     if messages:
+        url = f"{cfg['base']}{cfg['chat_path']}"
         payload = {
             "model": model,
             "messages": [{"role": "system", "content": system}] + messages,
@@ -260,6 +301,7 @@ async def _ollama_generate(prompt: str, system: str, model: str, session, cfg: d
             "options": {"temperature": 0.3},
         }
     else:
+        url = f"{cfg['base']}{cfg['generate_path']}"
         payload = {
             "model": model,
             "prompt": prompt,
@@ -269,7 +311,8 @@ async def _ollama_generate(prompt: str, system: str, model: str, session, cfg: d
         }
     async with session.post(url, json=payload, timeout=300) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"Ollama HTTP {resp.status}")
+            body = await resp.text()
+            raise RuntimeError(f"Ollama HTTP {resp.status}: {body[:200]}")
         result = await resp.json()
         if messages:
             return result["message"]["content"]
@@ -424,14 +467,30 @@ async def generate_build(request: web.Request) -> web.Response:
     player_name = data.get("player_name", "Player")
     provider = data.get("provider", DEFAULT_PROVIDER)
     api_key = data.get("api_key", "")
+    player_x = data.get("player_x", 0)
+    player_y = data.get("player_y", 64)
+    player_z = data.get("player_z", 0)
+    mini_mode = data.get("mini", False)
 
-    # Build the prompt with terrain context
-    full_prompt = (
-        f"Player: {player_name}\n"
-        f"Request: {user_prompt}\n\n"
-        f"Terrain scan (blocks around player, relative coords):\n{terrain_data}\n\n"
-        f"Respond with JSON:"
-    )
+    if mini_mode:
+        # Clear session to free up context
+        if session_id in sessions:
+            del sessions[session_id]
+        full_prompt = (
+            f"Player: {player_name} at ({player_x}, {player_y}, {player_z})\n"
+            f"Request: {user_prompt}\n\n"
+            f"Note: No terrain scan provided to save context tokens. "
+            f"Respond ONLY with chat and/or commands (no blocks).\n\n"
+            f"Respond with JSON:"
+        )
+    else:
+        # Build the prompt with terrain context
+        full_prompt = (
+            f"Player: {player_name} at ({player_x}, {player_y}, {player_z})\n"
+            f"Request: {user_prompt}\n\n"
+            f"Terrain scan (blocks around player, relative coords):\n{terrain_data}\n\n"
+            f"Respond with JSON:"
+        )
 
     # Get conversation history
     conv = _get_session(session_id)
@@ -458,6 +517,9 @@ async def generate_build(request: web.Request) -> web.Response:
 
     except Exception as e:
         logger.exception("Generation failed for provider=%s model=%s", provider, model)
+        err_msg = str(e).lower()
+        if any(kw in err_msg for kw in ["context length", "context_length", "too many tokens", "maximum context", "prompt is too long"]):
+            return web.json_response({"chat": f"Context limit reached! Use §e/ai mini <prompt>§r to send without terrain data (saves tokens). Error: {str(e)}"})
         return web.json_response({"chat": f"Sorry, I encountered an error: {str(e)}"})
 
 
@@ -474,24 +536,18 @@ async def chat_handler(request: web.Request) -> web.Response:
     provider = data.get("provider", DEFAULT_PROVIDER)
     api_key = data.get("api_key", "")
     player_name = data.get("player_name", "Player")
+    player_x = data.get("player_x", 0)
+    player_y = data.get("player_y", 64)
+    player_z = data.get("player_z", 0)
 
     if not message:
         return web.json_response({"chat": "Say something!"})
 
     conv = _get_session(session_id)
-    _add_message(session_id, "user", message)
+    full_message = f"Player: {player_name} at ({player_x}, {player_y}, {player_z})\nRequest: {message}"
+    _add_message(session_id, "user", full_message)
 
-    chat_system = (
-        "You are a friendly Minecraft AI assistant. You chat with the player, answer questions, "
-        "and can help with the game. Be concise, helpful, and stay in character.\n\n"
-        "You can also perform actions by outputting JSON with these fields:\n"
-        '- "chat": your response text (always include this)\n'
-        '- "commands": [{"cmd": "...", "confirm": true}]\n'
-        '- "blocks": [{"x":0,"y":1,"z":0,"id":"minecraft:..."}]\n\n'
-        "When the player asks you to do something in-game (build, give items, change game mode), "
-        "use the JSON action fields alongside your chat response.\n\n"
-        "Output ONLY valid JSON."
-    )
+    chat_system = SYSTEM_PROMPT
 
     try:
         ai_response = await generate(provider, message, chat_system, model,
@@ -508,6 +564,9 @@ async def chat_handler(request: web.Request) -> web.Response:
 
     except Exception as e:
         logger.exception("Chat failed")
+        err_msg = str(e).lower()
+        if any(kw in err_msg for kw in ["context length", "context_length", "too many tokens", "maximum context", "prompt is too long"]):
+            return web.json_response({"chat": f"Context limit reached! Try §e/ai mini <prompt>§r to start fresh without terrain data. Error: {str(e)}"})
         return web.json_response({"chat": f"Error: {str(e)}"})
 
 
@@ -523,6 +582,9 @@ async def command_result_handler(request: web.Request) -> web.Response:
     provider = data.get("provider", DEFAULT_PROVIDER)
     api_key = data.get("api_key", "")
     player_name = data.get("player_name", "Player")
+    player_x = data.get("player_x", 0)
+    player_y = data.get("player_y", 64)
+    player_z = data.get("player_z", 0)
     outputs = data.get("command_outputs", [])
 
     if not outputs:
@@ -532,7 +594,7 @@ async def command_result_handler(request: web.Request) -> web.Response:
     lines = [f"Command executed: {o.get('command', '?')}\nOutput:\n{o.get('output', '(empty)')}" for o in outputs]
     context = "\n\n".join(lines)
     follow_up_prompt = (
-        f"Player: {player_name}\n\n"
+        f"Player: {player_name} at ({player_x}, {player_y}, {player_z})\n\n"
         f"The following commands were executed and their output was captured:\n\n"
         f"{context}\n\n"
         f"Based on this output, take the necessary follow-up actions "
@@ -572,6 +634,9 @@ async def command_result_handler(request: web.Request) -> web.Response:
 
     except Exception as e:
         logger.exception("Follow-up generation failed")
+        err_msg = str(e).lower()
+        if any(kw in err_msg for kw in ["context length", "context_length", "too many tokens", "maximum context", "prompt is too long"]):
+            return web.json_response({"chat": f"Context limit reached! Try starting fresh with §e/ai mini <prompt>§r. Error: {str(e)}"})
         return web.json_response({"chat": f"Follow-up error: {str(e)}"})
 
 

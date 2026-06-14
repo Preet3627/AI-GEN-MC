@@ -1,22 +1,38 @@
-## AI Builder Mod v1.0.0 — Minecraft 1.21.11
+## v0.2.0 — No Backend Required
 
-This release ports the mod to **Minecraft 1.21.11 Fabric** and adds a custom mod icon.
+The Python bridge is gone. The mod now talks to AI providers directly — zero setup, zero external processes.
 
-### What's Changed
-- **Minecraft 1.21.11** — updated all deps: Fabric Loom 1.14.10, Fabric API 0.141.4, Yarn mappings 1.21.11+build.6
-- **Fixed API breaks** — adapted to 1.21.11 API changes (`getEntityWorld`, `parseAndExecute`, `ClickEvent`/`HoverEvent` interface refactor)
-- **Mod icon** — added AI Builder icon
-- **Version range** — mod accepts `>=1.21.1` so it loads on 1.21.11 without issues
+### What's New
 
-### Features
-- `/ai make <prompt>` — AI-powered terrain-aware building
-- Multi-provider AI support: Ollama, OpenAI, Groq, xAI, Anthropic, Google
-- Undo/redo, build history, confirmation system for commands/shell
-- Python bridge (`python-bridge/bridge.py`) with live model listing
-- Block placement, signs, chests, command blocks, shell commands
-- AI-initiated undo/redo
+- **Self-contained** — No Python, no bridge server, no `pip install`. Just the JAR.
+- **`AiBridge.java`** — Full multi-provider AI router built into the mod. Supports Ollama, OpenAI, Groq, xAI, Anthropic Claude, and Google Gemini.
+- **Session memory** — Conversation history is managed in-mod per player.
+- **Response cleaning** — Markdown fences, JSON comments, and block ID corrections all handled internally.
 
-### Assets
-- `ai-builder-mod-*.jar` — the Fabric mod
-- `bridge.py` — Python AI bridge (run alongside the mod)
-- `requirements.txt` — Python dependencies
+### Breaking Changes
+
+- The `python-bridge/` directory is no longer needed and can be deleted.
+- No more `http://localhost:5001` — the mod calls provider APIs directly.
+- No more starting `bridge.py` before launching Minecraft.
+
+### Project Structure
+
+```
+fabric-mod/src/main/java/com/example/ai/
+├── AIBuilderMod.java         # Commands, undo/redo, confirm/deny
+├── AiBridge.java             # NEW — Multi-provider AI router
+├── AIActionExecutor.java     # Action handler + build history
+├── TerrainScanner.java       # Chunk scanner
+├── CommandCapture.java       # Command output capture
+└── ModConfig.java            # Config persistence
+```
+
+### Full Changelog
+
+- Ported `python-bridge/bridge.py` (694 lines) into `AiBridge.java`
+- Removed all HTTP client code from `AIBuilderMod.java` — no more `HttpClient`, `HttpRequest`, `HttpResponse`
+- Session management with 1-hour TTL and 50-message cap built into the mod
+- Response cleaning: strips markdown fences, JSON comments, corrects block IDs (dirt_block → dirt, etc.)
+- Provider-specific API implementations for all 6 providers with correct auth and payload formats
+- Follow-up loop for captured command results handled in-mod
+- Release workflow no longer builds/packages Python bridge

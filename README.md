@@ -1,10 +1,10 @@
-# 🧠 AI Builder Mod — Minecraft × Ollama × Multi-Provider AI
+# 🧠 AI Builder Mod — Minecraft × Multi-Provider AI
 
-[![Version](https://img.shields.io/badge/version-v0.1.0--beta-blue)]()
+[![Version](https://img.shields.io/badge/version-v0.2.0--beta-blue)]()
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Fabric](https://img.shields.io/badge/mod%20loader-Fabric-dbd0b4)]()
 
-> **Build anything in Minecraft using AI** — houses, bridges, roller coasters, PVP arenas, minigames. The AI reads your terrain, adapts to water/mountains, places blocks, runs commands, fills chests, writes signs, places command blocks, and more.
+> **Build anything in Minecraft using AI** — houses, bridges, roller coasters, PVP arenas, minigames. The AI reads your terrain, adapts to water/mountains, places blocks, runs commands, fills chests, writes signs, places command blocks, and more. **No external server or Python needed** — the mod talks to AI providers directly.
 
 ---
 
@@ -34,7 +34,6 @@
 
 - **Minecraft**: 1.21.1 with **Fabric Loader** 0.16+
 - **Java**: 21+
-- **Python**: 3.9+
 - **Ollama** (optional, for local models): [ollama.com](https://ollama.com)
 - **API Keys** (for cloud providers): OpenAI / Anthropic / Google / Groq / xAI
 
@@ -42,28 +41,30 @@
 
 ## 📦 Setup
 
-### 1️⃣ Python Bridge
-
-```bash
-cd python-bridge
-pip install -r requirements.txt
-python3 bridge.py
-```
-
-The bridge runs on `http://localhost:5001`.
-
-### 2️⃣ Compile the Mod
+### 1️⃣ Compile the Mod
 
 ```bash
 cd fabric-mod
 ./gradlew build
 ```
 
-Copy `fabric-mod/build/libs/ai-builder-mod-1.0.0.jar` → `.minecraft/mods/`
+Copy `fabric-mod/build/libs/ai-builder-mod-*.jar` → `.minecraft/mods/`
 
-### 3️⃣ Launch Minecraft
+### 2️⃣ Launch Minecraft
 
 Use the Fabric profile. Join any world.
+
+### 3️⃣ Configure a Provider
+
+The mod defaults to Ollama (no setup needed if running locally). For cloud providers:
+
+```
+/ai provider openai
+/ai key openai sk-your-key-here
+/ai model gpt-4o
+```
+
+See [Provider Setup](#-provider-setup) below.
 
 ---
 
@@ -73,7 +74,7 @@ Use the Fabric profile. Join any world.
 |---|---|
 | `/ai make <prompt>` | Ask AI to build or do anything |
 | `/ai provider <name>` | Switch AI provider: `ollama`, `openai`, `groq`, `xai`, `anthropic`, `google` |
-| `/ai key <provider> <key>` | Set API key for a provider (session-only, not stored) |
+| `/ai key <provider> <key>` | Set API key for a provider (persisted to config file) |
 | `/ai model <name>` | Select a specific model |
 | `/ai models` | List available models from current provider |
 | `/ai list` | Alias for `/ai models` |
@@ -81,8 +82,11 @@ Use the Fabric profile. Join any world.
 | `/ai redo` | Redo the last undone AI build |
 | `/ai history` | Show build history |
 | `/ai help` | Show all commands |
+| `/ai chat <message>` | Chat with AI (conversation memory) |
+| `/ai chat toggle` | Toggle AI chat responses on/off |
 | `/ai confirm <id>` | Confirm a pending action |
 | `/ai deny <id>` | Deny a pending action |
+| `/ai gui` | Open config GUI (or press K) |
 
 ---
 
@@ -164,23 +168,25 @@ Default provider. No API key needed. Set model with `/ai model <name>`.
 ## 🤖 How It Works
 
 ```
-┌──────────────────┐     POST /generate-build     ┌──────────────────┐     Provider API     ┌──────────┐
-│  Minecraft Mod    │ ──────────────────────────> │  Python Bridge   │ ──────────────────> │  OpenAI   │
-│  (Fabric 1.21.1)  │ <────────────────────────── │  (aiohttp :5001) │ <────────────────── │  Groq     │
-│  TerrainScanner   │     JSON action object      │  bridge.py       │                    │  xAI      │
-│  AIActionExecutor │                             │  Multi-Provider  │                    │  Claude   │
-│  BuildHistory     │                             │  Router          │                    │  Gemini   │
-└──────────────────┘                             └──────────────────┘                    │  Ollama   │
-                                                                                        └──────────┘
+┌──────────────────────────┐     Provider API     ┌──────────┐
+│  Minecraft Mod (Fabric)  │ ──────────────────> │  OpenAI   │
+│  AiBridge (provider      │ <────────────────── │  Groq     │
+│    router + session      │                     │  xAI      │
+│    management)           │                     │  Claude   │
+│  TerrainScanner          │                     │  Gemini   │
+│  AIActionExecutor        │                     │  Ollama   │
+│  BuildHistory            │                     └──────────┘
+└──────────────────────────┘
 ```
 
 1. Player types `/ai make a fishing hut`
 2. **TerrainScanner** samples a 31×31×9 area around the player → native block IDs
-3. Mod sends terrain + prompt + provider + model + player name → Python bridge
-4. Bridge routes to the selected AI provider with a Minecraft-aware system prompt
+3. **AiBridge** builds the prompt with terrain context, conversation history, and the Minecraft system prompt
+4. AiBridge calls the selected AI provider directly (Ollama/OpenAI/Groq/xAI/Anthropic/Google)
 5. AI returns a JSON object: `{"blocks": [...], "commands": [...], "signs": [...], "chests": [...], "command_blocks": [...]}`
 6. **AIActionExecutor** processes each action type — places blocks, runs commands, fills chests, etc.
 7. **BuildHistory** records every change for undo/redo
+8. Follow-up loop: captured command outputs are fed back to the AI for autonomous multi-step tasks
 
 ---
 
@@ -190,12 +196,12 @@ Default provider. No API key needed. Set model with `/ai model <name>`.
 ├── fabric-mod/
 │   ├── build.gradle / settings.gradle / gradle.properties
 │   └── src/main/java/com/example/ai/
-│       ├── AIBuilderMod.java         # Commands + HTTP + provider/key mgmt
+│       ├── AIBuilderMod.java         # Commands + undo/redo + confirm/deny
+│       ├── AiBridge.java             # Multi-provider AI router (in-mod)
 │       ├── AIActionExecutor.java     # Action handler + build history
-│       └── TerrainScanner.java       # Chunk scanner
-├── python-bridge/
-│   ├── requirements.txt
-│   └── bridge.py                     # Multi-provider AI router
+│       ├── TerrainScanner.java       # Chunk scanner
+│       ├── CommandCapture.java       # Command output capture
+│       └── ModConfig.java            # Config persistence
 ├── tests/
 │   ├── pvp-arena-prompt.txt          # Test prompts
 │   └── pvp-arena-response.json       # Expected AI output
@@ -211,13 +217,7 @@ Default provider. No API key needed. Set model with `/ai model <name>`.
 
 ## 🧪 Tests
 
-Test prompts and expected AI responses are in [`tests/`](tests/).
-
-To run a test:
-```bash
-cat tests/pvp-arena-prompt.txt | curl -X POST http://localhost:5001/generate-build \
-  -H "Content-Type: application/json" -d @-
-```
+Test prompts and expected AI responses are in [`tests/`](tests/). These serve as reference for what the AI should output — the JSON structure is parsed by `AIActionExecutor` to place blocks, run commands, etc.
 
 ---
 
