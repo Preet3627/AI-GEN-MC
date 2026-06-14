@@ -1,4 +1,3 @@
-"""
 AI Bridge for Minecraft Builder Mod — Multi-Provider (v0.2.0)
 
 Features:
@@ -6,7 +5,6 @@ Features:
   - Per-player chat sessions with conversation memory
   - Terrain-aware building
   - Chat responses, commands, shell execution
-"""
 
 import json
 import logging
@@ -22,9 +20,6 @@ from templates import TEMPLATES
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-bridge")
 
-# -------------------------------------------------------------------
-# Provider config
-# -------------------------------------------------------------------
 PROVIDER_CONFIGS = {
     "ollama": {
         "base": os.getenv("OLLAMA_BASE", "http://localhost:11434"),
@@ -68,9 +63,6 @@ DEFAULT_PROVIDER = os.getenv("AI_PROVIDER", "ollama")
 DEFAULT_MODEL = os.getenv("AI_MODEL", "gpt-oss:120b-cloud")
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "5001"))
 
-# -------------------------------------------------------------------
-# Session memory
-# -------------------------------------------------------------------
 sessions: dict = {}  # session_id -> list of {"role": ..., "content": ...}
 SESSION_TTL = 3600  # 1 hour
 
@@ -93,9 +85,6 @@ def _add_message(session_id: str, role: str, content: str):
     if len(msgs) > 50:
         msgs.pop(0)
 
-# -------------------------------------------------------------------
-# System prompt
-# -------------------------------------------------------------------
 _TEMPLATE_LIST = "\n".join(
     f'  - "{name}": {t["description"]} ({t["dimensions"]}, ~{t["block_count"]})'
     for name, t in TEMPLATES.items()
@@ -207,9 +196,6 @@ SYSTEM_PROMPT = (
     "- Coordinates are RELATIVE to the player. x=right, z=forward, y=up."
 )
 
-# -------------------------------------------------------------------
-# Helpers
-# -------------------------------------------------------------------
 def _clean_response(text: str) -> str:
     text = text.strip()
     if text.startswith("...") or text.startswith("```"):
@@ -244,11 +230,7 @@ def _fix_block_ids(obj):
             _fix_block_ids(item)
 
 
-# -------------------------------------------------------------------
-# Provider implementations
-# -------------------------------------------------------------------
 
-# --- Ollama ---
 async def _ollama_generate(prompt: str, system: str, model: str, session, cfg: dict,
                            api_key: str = "", messages: list = None) -> str:
     url = f"{cfg['base']}{cfg['generate_path']}"
@@ -284,7 +266,6 @@ async def _ollama_models(session, cfg: dict, api_key: str = "") -> list:
         return [{"name": m["name"]} for m in data.get("models", [])]
 
 
-# --- OpenAI-compatible (OpenAI, Groq, xAI) ---
 async def _openai_generate(prompt: str, system: str, model: str, session, cfg: dict,
                            api_key: str = "", messages: list = None) -> str:
     url = f"{cfg['base']}{cfg['generate_path']}"
@@ -312,7 +293,6 @@ async def _openai_models(session, cfg: dict, api_key: str = "") -> list:
         return [{"name": m["id"]} for m in data.get("data", [])]
 
 
-# --- Anthropic Claude ---
 async def _anthropic_generate(prompt: str, system: str, model: str, session, cfg: dict,
                               api_key: str = "", messages: list = None) -> str:
     url = f"{cfg['base']}{cfg['generate_path']}"
@@ -346,7 +326,6 @@ async def _anthropic_models(_session, _cfg, _api_key=None) -> list:
     return [{"name": m} for m in _ANTHROPIC_MODELS]
 
 
-# --- Google Gemini ---
 async def _google_generate(prompt: str, system: str, model: str, session, cfg: dict,
                            api_key: str = "", messages: list = None) -> str:
     path = cfg["generate_path"].replace("{model}", model)
@@ -375,9 +354,6 @@ async def _google_models(session, cfg: dict, api_key: str = "") -> list:
                 if "generateContent" in m.get("supportedGenerationMethods", [])]
 
 
-# -------------------------------------------------------------------
-# Provider router
-# -------------------------------------------------------------------
 PROVIDER_ROUTERS = {
     "ollama": (_ollama_generate, _ollama_models, False),
     "openai": (_openai_generate, _openai_models, True),
@@ -407,12 +383,9 @@ async def list_models(provider: str, session, api_key: str = "") -> list:
     return await models_func(session, cfg, api_key)
 
 
-# -------------------------------------------------------------------
-# HTTP handlers
-# -------------------------------------------------------------------
 
 async def generate_build(request: web.Request) -> web.Response:
-    try:
+    try
         data = await request.json()
     except Exception:
         return web.json_response({"chat": "Error reading request."}, status=400)
@@ -425,7 +398,6 @@ async def generate_build(request: web.Request) -> web.Response:
     provider = data.get("provider", DEFAULT_PROVIDER)
     api_key = data.get("api_key", "")
 
-    # Build the prompt with terrain context
     full_prompt = (
         f"Player: {player_name}\n"
         f"Request: {user_prompt}\n\n"
@@ -433,7 +405,6 @@ async def generate_build(request: web.Request) -> web.Response:
         f"Respond with JSON:"
     )
 
-    # Get conversation history
     conv = _get_session(session_id)
     _add_message(session_id, "user", full_prompt)
 
@@ -450,7 +421,6 @@ async def generate_build(request: web.Request) -> web.Response:
             logger.warning("AI returned invalid JSON, wrapping in chat")
             parsed = {"chat": f"I received your request but had trouble processing it. Raw response: {ai_response[:200]}"}
 
-        # Store AI response in history
         ai_content = json.dumps(parsed)
         _add_message(session_id, "assistant", ai_content)
 
@@ -462,7 +432,6 @@ async def generate_build(request: web.Request) -> web.Response:
 
 
 async def chat_handler(request: web.Request) -> web.Response:
-    """Simple conversational chat endpoint with memory."""
     try:
         data = await request.json()
     except Exception:
@@ -512,7 +481,6 @@ async def chat_handler(request: web.Request) -> web.Response:
 
 
 async def command_result_handler(request: web.Request) -> web.Response:
-    """Handle captured command output from the mod and let AI take follow-up actions."""
     try:
         data = await request.json()
     except Exception:
@@ -528,7 +496,6 @@ async def command_result_handler(request: web.Request) -> web.Response:
     if not outputs:
         return web.json_response({"chat": "No command outputs to process."})
 
-    # Build context from command outputs
     lines = [f"Command executed: {o.get('command', '?')}\nOutput:\n{o.get('output', '(empty)')}" for o in outputs]
     context = "\n\n".join(lines)
     follow_up_prompt = (

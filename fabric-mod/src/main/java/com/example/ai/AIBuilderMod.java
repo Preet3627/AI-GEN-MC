@@ -72,7 +72,7 @@ public class AIBuilderMod implements ModInitializer {
         chatCmd.then(CommandManager.literal("toggle")
                 .executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
-                    if (player == null) return 0;
+                    if (player == null) return 0
                     config.chatEnabled = !config.chatEnabled;
                     config.save();
                     player.sendMessage(Text.literal("§a[AI] Chat responses " + (config.chatEnabled ? "enabled" : "disabled")), false);
@@ -84,7 +84,7 @@ public class AIBuilderMod implements ModInitializer {
                     if (player == null) return 0;
                     String message = StringArgumentType.getString(context, "message");
                     sendChatToBridge(player, message);
-                    return 1;
+                    return 1
                 }));
         aiCmd.then(chatCmd);
 
@@ -201,7 +201,6 @@ public class AIBuilderMod implements ModInitializer {
         dispatcher.register(aiCmd);
     }
 
-    // ---- Undo / Redo ----
 
     private void undo(ServerPlayerEntity player) {
         if (undoStack.isEmpty()) {
@@ -231,7 +230,6 @@ public class AIBuilderMod implements ModInitializer {
         player.sendMessage(Text.literal("§e[AI] Redo: " + record.summary()), false);
     }
 
-    // ---- History ----
 
     private void showHistory(ServerPlayerEntity player) {
         if (history.isEmpty()) {
@@ -248,7 +246,6 @@ public class AIBuilderMod implements ModInitializer {
         }
     }
 
-    // ---- Models ----
 
     private void fetchModels(ServerPlayerEntity player) {
         String key = config.apiKeys.getOrDefault(config.selectedProvider, "");
@@ -285,10 +282,8 @@ public class AIBuilderMod implements ModInitializer {
                 });
     }
 
-    // ---- Confirm / Deny ----
 
     private void confirmAction(ServerPlayerEntity player, String id) {
-        // Check batched confirmations first
         List<AIActionExecutor.ConfirmAction> batch = batchedConfirmations.remove(id);
         if (batch != null) {
             int count = 0;
@@ -311,7 +306,6 @@ public class AIBuilderMod implements ModInitializer {
             return;
         }
 
-        // Single action fallback
         AIActionExecutor.ConfirmAction action = pendingActions.remove(id);
         if (action == null) {
             player.sendMessage(Text.literal("§c[AI] No pending action: " + id), false);
@@ -350,7 +344,6 @@ public class AIBuilderMod implements ModInitializer {
         player.sendMessage(Text.literal("§e[AI] Denied: " + action.description), false);
     }
 
-    // ---- Help ----
 
     private void showHelp(ServerPlayerEntity player) {
         player.sendMessage(Text.literal("§b===== AI Builder Mod Commands ====="), false);
@@ -371,7 +364,6 @@ public class AIBuilderMod implements ModInitializer {
         player.sendMessage(Text.literal("§7Chat responses: §" + (config.chatEnabled ? "aON" : "cOFF")), false);
     }
 
-    // ---- Bridge call (make) ----
 
     private void sendToBridge(ServerPlayerEntity player, String prompt, String terrainData) {
         HttpClient client = HttpClient.newHttpClient();
@@ -403,7 +395,6 @@ public class AIBuilderMod implements ModInitializer {
                 });
     }
 
-    // ---- Bridge call (chat) ----
 
     private void sendChatToBridge(ServerPlayerEntity player, String message) {
         HttpClient client = HttpClient.newHttpClient();
@@ -441,7 +432,6 @@ public class AIBuilderMod implements ModInitializer {
                 });
     }
 
-    // ---- Build base payload ----
 
     private JsonObject buildBasePayload(ServerPlayerEntity player, String prompt, String terrainData) {
         JsonObject payload = new JsonObject();
@@ -458,17 +448,14 @@ public class AIBuilderMod implements ModInitializer {
         return payload;
     }
 
-    // ---- Process AI response (with optional follow-up loop) ----
 
     private void processAiResponse(ServerPlayerEntity player, String jsonResponse, String prompt, int depth) {
         var result = AIActionExecutor.execute(player.getEntityWorld(), player, jsonResponse);
 
-        // Send AI chat message (only if player has chat responses enabled)
         if (result.chatMessage != null && !result.chatMessage.isEmpty() && config.chatEnabled) {
             player.sendMessage(Text.literal("§d[AI] " + result.chatMessage), false);
         }
 
-        // Handle AI undo/redo requests
         if (result.undoRequested) {
             for (int i = 0; i < result.undoSteps && !undoStack.isEmpty(); i++) undo(player);
         }
@@ -476,17 +463,14 @@ public class AIBuilderMod implements ModInitializer {
             for (int i = 0; i < result.redoSteps && !redoStack.isEmpty(); i++) redo(player);
         }
 
-        // If there are captured command outputs, send follow-up request
         if (!result.capturedOutputs.isEmpty() && depth < 3) {
             sendCapturedOutputsFollowUp(player, result.capturedOutputs, depth, result);
             return;
         }
 
-        // No more follow-ups — record build
         finishBuild(player, result, prompt);
     }
 
-    // ---- Follow-up: send captured outputs to bridge ----
 
     private void sendCapturedOutputsFollowUp(ServerPlayerEntity player,
                                               List<CommandCapture.CapturedOutput> outputs,
@@ -537,7 +521,6 @@ public class AIBuilderMod implements ModInitializer {
                 });
     }
 
-    // ---- Finish build (record history, show summary) ----
 
     private void finishBuild(ServerPlayerEntity player, AIActionExecutor.ActionResult result, String prompt) {
         result.record.prompt = prompt;

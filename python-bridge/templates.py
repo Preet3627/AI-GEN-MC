@@ -1,11 +1,9 @@
-"""
 Build templates for AI Builder Mod.
 Each template describes a structure the AI can build.
 Templates focus on dimensions, materials, and layout patterns.
-"""
 
 TEMPLATES = {
-    "small_starter_house": {
+    "small_starter_house" {
         "name": "Small Starter House",
         "description": "A cozy 5x5 oak starter home with a pitched roof, door, and windows.",
         "dimensions": "5 wide x 5 deep x 4 tall",
