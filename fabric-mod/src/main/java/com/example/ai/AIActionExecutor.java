@@ -70,10 +70,12 @@ public class AIActionExecutor {
         public BuildRecord record = new BuildRecord();
         public int blocksPlaced;
         public List<ConfirmAction> pendingConfirmations = new ArrayList<>();
+        public List<CommandCapture.CapturedOutput> capturedOutputs = new ArrayList<>();
         public boolean undoRequested;
         public int undoSteps;
         public boolean redoRequested;
         public int redoSteps;
+        public String chatMessage;
     }
 
     public static ActionResult execute(ServerWorld world, ServerPlayerEntity player, String jsonResponse) {
@@ -94,6 +96,11 @@ public class AIActionExecutor {
         if (!root.isJsonObject()) return result;
         JsonObject obj = root.getAsJsonObject();
 
+        // Chat message
+        if (obj.has("chat")) {
+            result.chatMessage = obj.get("chat").getAsString();
+        }
+
         if (obj.has("undo")) {
             result.undoRequested = true;
             result.undoSteps = obj.get("undo").getAsJsonObject().has("steps")
@@ -113,8 +120,13 @@ public class AIActionExecutor {
                 JsonObject cmdObj = e.getAsJsonObject();
                 String cmd = cmdObj.get("cmd").getAsString();
                 String desc = cmdObj.has("desc") ? cmdObj.get("desc").getAsString() : cmd;
+                boolean capture = cmdObj.has("capture") && cmdObj.get("capture").getAsBoolean();
                 boolean confirm = cmdObj.has("confirm") && cmdObj.get("confirm").getAsBoolean();
-                if (confirm) {
+                if (capture) {
+                    var captured = CommandCapture.executeAndCapture(world, cmd);
+                    result.capturedOutputs.add(captured);
+                    result.record.commandsExecuted++;
+                } else if (confirm) {
                     ConfirmAction ca = new ConfirmAction();
                     ca.id = java.util.UUID.randomUUID().toString().substring(0, 8);
                     ca.command = cmd;

@@ -1,6 +1,7 @@
 package com.example.ai;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.brigadier.CommandDispatcher;
@@ -15,6 +16,8 @@ import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -25,19 +28,24 @@ import java.util.stream.Collectors;
 
 public class AIBuilderMod implements ModInitializer {
     private static final String BRIDGE_BASE = "http://localhost:5001";
-    private static final Gson GSON = new Gson();
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Logger LOGGER = LoggerFactory.getLogger("ai-builder-mod");
 
-    private static String selectedProvider = "ollama";
-    private static String selectedModel = "";
-    private static final Map<String, String> apiKeys = new HashMap<>();
+    private static ModConfig config = new ModConfig();
 
     private static final Stack<AIActionExecutor.BuildRecord> undoStack = new Stack<>();
     private static final Stack<AIActionExecutor.BuildRecord> redoStack = new Stack<>();
     private static final List<AIActionExecutor.BuildRecord> history = new ArrayList<>();
     private static final Map<String, AIActionExecutor.ConfirmAction> pendingActions = new HashMap<>();
+    private static final Map<String, List<AIActionExecutor.ConfirmAction>> batchedConfirmations = new HashMap<>();
+
+    public static ModConfig getConfig() { return config; }
+    public static void saveConfig() { config.save(); }
 
     @Override
     public void onInitialize() {
+        config = ModConfig.load();
+        LOGGER.info("AI Builder Mod loaded (provider={}, model={})", config.selectedProvider, config.selectedModel);
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
             registerCommands(dispatcher)
         );
@@ -46,7 +54,6 @@ public class AIBuilderMod implements ModInitializer {
     private void registerCommands(CommandDispatcher<ServerCommandSource> dispatcher) {
         var aiCmd = CommandManager.literal("ai");
 
-        // /ai make <prompt>
         aiCmd.then(CommandManager.literal("make")
                 .then(CommandManager.argument("prompt", StringArgumentType.greedyString())
                         .executes(context -> {
@@ -61,18 +68,27 @@ public class AIBuilderMod implements ModInitializer {
                             return 1;
                         })));
 
-        // /ai provider <name>
+        aiCmd.then(CommandManager.literal("chat")
+                .then(CommandManager.argument("message", StringArgumentType.greedyString())
+                        .executes(context -> {
+                            ServerPlayerEntity player = context.getSource().getPlayer();
+                            if (player == null) return 0;
+                            String message = StringArgumentType.getString(context, "message");
+                            sendChatToBridge(player, message);
+                            return 1;
+                        })));
+
         aiCmd.then(CommandManager.literal("provider")
                 .then(CommandManager.argument("name", StringArgumentType.word())
                         .executes(context -> {
                             ServerPlayerEntity player = context.getSource().getPlayer();
                             if (player == null) return 0;
-                            selectedProvider = StringArgumentType.getString(context, "name").toLowerCase();
-                            player.sendMessage(Text.literal("§a[AI] Provider set to: " + selectedProvider), false);
+                            config.selectedProvider = StringArgumentType.getString(context, "name").toLowerCase();
+                            config.save();
+                            player.sendMessage(Text.literal("§a[AI] Provider set to: " + config.selectedProvider), false);
                             return 1;
                         })));
 
-        // /ai key <provider> <key>
         aiCmd.then(CommandManager.literal("key")
                 .then(CommandManager.argument("provider", StringArgumentType.word())
                         .then(CommandManager.argument("key", StringArgumentType.greedyString())
@@ -81,23 +97,23 @@ public class AIBuilderMod implements ModInitializer {
                                     if (player == null) return 0;
                                     String prov = StringArgumentType.getString(context, "provider").toLowerCase();
                                     String key = StringArgumentType.getString(context, "key");
-                                    apiKeys.put(prov, key);
+                                    config.apiKeys.put(prov, key);
+                                    config.save();
                                     player.sendMessage(Text.literal("§a[AI] API key set for " + prov), false);
                                     return 1;
                                 }))));
 
-        // /ai model <name>
         aiCmd.then(CommandManager.literal("model")
                 .then(CommandManager.argument("name", StringArgumentType.greedyString())
                         .executes(context -> {
                             ServerPlayerEntity player = context.getSource().getPlayer();
                             if (player == null) return 0;
-                            selectedModel = StringArgumentType.getString(context, "name").trim();
-                            player.sendMessage(Text.literal("§a[AI] Model set to: " + selectedModel), false);
+                            config.selectedModel = StringArgumentType.getString(context, "name").trim();
+                            config.save();
+                            player.sendMessage(Text.literal("§a[AI] Model set to: " + config.selectedModel), false);
                             return 1;
                         })));
 
-        // /ai models
         aiCmd.then(CommandManager.literal("models")
                 .executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
@@ -106,7 +122,6 @@ public class AIBuilderMod implements ModInitializer {
                     return 1;
                 }));
 
-        // /ai list (alias for models)
         aiCmd.then(CommandManager.literal("list")
                 .executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
@@ -115,7 +130,6 @@ public class AIBuilderMod implements ModInitializer {
                     return 1;
                 }));
 
-        // /ai undo
         aiCmd.then(CommandManager.literal("undo")
                 .executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
@@ -124,7 +138,6 @@ public class AIBuilderMod implements ModInitializer {
                     return 1;
                 }));
 
-        // /ai redo
         aiCmd.then(CommandManager.literal("redo")
                 .executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
@@ -133,7 +146,6 @@ public class AIBuilderMod implements ModInitializer {
                     return 1;
                 }));
 
-        // /ai history
         aiCmd.then(CommandManager.literal("history")
                 .executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
@@ -142,7 +154,6 @@ public class AIBuilderMod implements ModInitializer {
                     return 1;
                 }));
 
-        // /ai confirm <id>
         aiCmd.then(CommandManager.literal("confirm")
                 .then(CommandManager.argument("id", StringArgumentType.word())
                         .executes(context -> {
@@ -152,7 +163,6 @@ public class AIBuilderMod implements ModInitializer {
                             return 1;
                         })));
 
-        // /ai deny <id>
         aiCmd.then(CommandManager.literal("deny")
                 .then(CommandManager.argument("id", StringArgumentType.word())
                         .executes(context -> {
@@ -162,7 +172,14 @@ public class AIBuilderMod implements ModInitializer {
                             return 1;
                         })));
 
-        // /ai help
+        aiCmd.then(CommandManager.literal("gui")
+                .executes(context -> {
+                    ServerPlayerEntity player = context.getSource().getPlayer();
+                    if (player == null) return 0;
+                    player.sendMessage(Text.literal("§e[AI] Use /ai provider <name>, /ai model <name>, and /ai key <provider> <key> to configure."), false);
+                    return 1;
+                }));
+
         aiCmd.then(CommandManager.literal("help")
                 .executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
@@ -224,10 +241,10 @@ public class AIBuilderMod implements ModInitializer {
     // ---- Models ----
 
     private void fetchModels(ServerPlayerEntity player) {
-        String key = apiKeys.getOrDefault(selectedProvider, "");
+        String key = config.apiKeys.getOrDefault(config.selectedProvider, "");
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(BRIDGE_BASE + "/list-models?provider=" + selectedProvider + "&api_key=" + key))
+                .uri(URI.create(BRIDGE_BASE + "/list-models?provider=" + config.selectedProvider + "&api_key=" + key))
                 .GET()
                 .build();
 
@@ -236,7 +253,7 @@ public class AIBuilderMod implements ModInitializer {
                 .thenAccept(response -> player.getEntityWorld().getServer().execute(() -> {
                     try {
                         JsonArray models = GSON.fromJson(response, JsonArray.class);
-                        player.sendMessage(Text.literal("§b[AI] Models (" + selectedProvider + "):"), false);
+                        player.sendMessage(Text.literal("§b[AI] Models (" + config.selectedProvider + "):"), false);
                         int count = 0;
                         for (var m : models) {
                             String name = m.getAsJsonObject().get("name").getAsString();
@@ -246,8 +263,8 @@ public class AIBuilderMod implements ModInitializer {
                                 break;
                             }
                         }
-                        if (!selectedModel.isEmpty())
-                            player.sendMessage(Text.literal("§7Current: §f" + selectedModel), false);
+                        if (!config.selectedModel.isEmpty())
+                            player.sendMessage(Text.literal("§7Current: §f" + config.selectedModel), false);
                     } catch (Exception e) {
                         player.sendMessage(Text.literal("§c[AI] Failed to list models."), false);
                     }
@@ -261,6 +278,30 @@ public class AIBuilderMod implements ModInitializer {
     // ---- Confirm / Deny ----
 
     private void confirmAction(ServerPlayerEntity player, String id) {
+        // Check batched confirmations first
+        List<AIActionExecutor.ConfirmAction> batch = batchedConfirmations.remove(id);
+        if (batch != null) {
+            int count = 0;
+            for (var action : batch) {
+                if (!action.playerId.equals(player.getUuidAsString())) continue;
+                switch (action.type) {
+                    case "command" -> {
+                        String cmd = action.command.startsWith("/") ? action.command.substring(1) : action.command;
+                        player.getEntityWorld().getServer().getCommandManager().parseAndExecute(
+                                player.getEntityWorld().getServer().getCommandSource(), cmd);
+                        count++;
+                    }
+                    case "shell" -> {
+                        AIActionExecutor.executeShell(action.command);
+                        count++;
+                    }
+                }
+            }
+            player.sendMessage(Text.literal("§a[AI] Executed " + count + " actions"), false);
+            return;
+        }
+
+        // Single action fallback
         AIActionExecutor.ConfirmAction action = pendingActions.remove(id);
         if (action == null) {
             player.sendMessage(Text.literal("§c[AI] No pending action: " + id), false);
@@ -286,6 +327,11 @@ public class AIBuilderMod implements ModInitializer {
     }
 
     private void denyAction(ServerPlayerEntity player, String id) {
+        List<AIActionExecutor.ConfirmAction> batch = batchedConfirmations.remove(id);
+        if (batch != null) {
+            player.sendMessage(Text.literal("§e[AI] Denied " + batch.size() + " actions."), false);
+            return;
+        }
         AIActionExecutor.ConfirmAction action = pendingActions.remove(id);
         if (action == null) {
             player.sendMessage(Text.literal("§c[AI] No pending action: " + id), false);
@@ -299,7 +345,8 @@ public class AIBuilderMod implements ModInitializer {
     private void showHelp(ServerPlayerEntity player) {
         player.sendMessage(Text.literal("§b===== AI Builder Mod Commands ====="), false);
         player.sendMessage(Text.literal("§e/ai make <prompt> §7- Build or do anything"), false);
-        player.sendMessage(Text.literal("§e/ai provider <name> §7- Switch provider (ollama/openai/groq/xai/anthropic/google)"), false);
+        player.sendMessage(Text.literal("§e/ai chat <message> §7- Chat with AI (has memory)"), false);
+        player.sendMessage(Text.literal("§e/ai provider <name> §7- Switch provider"), false);
         player.sendMessage(Text.literal("§e/ai key <provider> <key> §7- Set API key"), false);
         player.sendMessage(Text.literal("§e/ai model <name> §7- Select AI model"), false);
         player.sendMessage(Text.literal("§e/ai models §7- List models for current provider"), false);
@@ -308,23 +355,15 @@ public class AIBuilderMod implements ModInitializer {
         player.sendMessage(Text.literal("§e/ai history §7- Show build history"), false);
         player.sendMessage(Text.literal("§e/ai confirm <id> §7- Confirm pending action"), false);
         player.sendMessage(Text.literal("§e/ai deny <id> §7- Deny pending action"), false);
+        player.sendMessage(Text.literal("§7Provider: §f" + config.selectedProvider + " §7| Model: §f" + (config.selectedModel.isEmpty() ? "default" : config.selectedModel)), false);
     }
 
-    // ---- Bridge call ----
+    // ---- Bridge call (make) ----
 
     private void sendToBridge(ServerPlayerEntity player, String prompt, String terrainData) {
         HttpClient client = HttpClient.newHttpClient();
 
-        JsonObject payload = new JsonObject();
-        payload.addProperty("prompt", prompt);
-        payload.addProperty("terrain", terrainData);
-        payload.addProperty("player_x", player.getBlockX());
-        payload.addProperty("player_y", player.getBlockY());
-        payload.addProperty("player_z", player.getBlockZ());
-        payload.addProperty("model", selectedModel);
-        payload.addProperty("player_name", player.getName().getString());
-        payload.addProperty("provider", selectedProvider);
-        payload.addProperty("api_key", apiKeys.getOrDefault(selectedProvider, ""));
+        JsonObject payload = buildBasePayload(player, prompt, terrainData);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BRIDGE_BASE + "/generate-build"))
@@ -336,52 +375,10 @@ public class AIBuilderMod implements ModInitializer {
                 .thenApply(HttpResponse::body)
                 .thenAccept(response -> {
                     if (response == null || response.isBlank()) return;
+                    LOGGER.info("AI raw response:\n{}", response);
                     player.getEntityWorld().getServer().execute(() -> {
                         try {
-                            var result = AIActionExecutor.execute(player.getEntityWorld(), player, response);
-
-                            // Handle AI undo/redo requests
-                            if (result.undoRequested) {
-                                for (int i = 0; i < result.undoSteps && !undoStack.isEmpty(); i++) undo(player);
-                            }
-                            if (result.redoRequested) {
-                                for (int i = 0; i < result.redoSteps && !redoStack.isEmpty(); i++) redo(player);
-                            }
-
-                            // Record build history
-                            result.record.prompt = prompt;
-                            if (!result.record.changes.isEmpty() || result.record.commandsExecuted > 0
-                                    || result.record.signsPlaced > 0) {
-                                undoStack.push(result.record);
-                                redoStack.clear();
-                                history.add(0, result.record);
-                                if (history.size() > 100) history.remove(history.size() - 1);
-                            }
-
-                            // Summary message
-                            var summary = Text.literal("§a[AI] Done!");
-                            String recSummary = result.record.summary();
-                            if (!recSummary.isEmpty())
-                                summary.append(Text.literal(" §7(" + recSummary + ")"));
-                            player.sendMessage(summary, false);
-
-                            // Pending confirmations
-                            for (var ca : result.pendingConfirmations) {
-                                pendingActions.put(ca.id, ca);
-                                var txt = Text.literal("§e[AI] " + ca.description + "\n")
-                                        .append(Text.literal("  §a[§lCONFIRM§r§a]")
-                                                .styled(s -> s.withClickEvent(
-                                                new ClickEvent.RunCommand("/ai confirm " + ca.id))
-                                                        .withHoverEvent(new HoverEvent.ShowText(
-                                                                 Text.literal("Click to confirm")))))
-                                        .append(Text.literal("  "))
-                                        .append(Text.literal("§c[§lDENY§r§c]")
-                                                .styled(s -> s.withClickEvent(
-                                                new ClickEvent.RunCommand("/ai deny " + ca.id))
-                                                        .withHoverEvent(new HoverEvent.ShowText(
-                                                                 Text.literal("Click to deny")))));
-                                player.sendMessage(txt, false);
-                            }
+                            processAiResponse(player, response, prompt, 0);
                         } catch (Exception e) {
                             player.sendMessage(Text.literal("§c[AI] Error: " + e.getMessage()), false);
                         }
@@ -391,5 +388,182 @@ public class AIBuilderMod implements ModInitializer {
                     player.sendMessage(Text.literal("§c[AI] Cannot reach bridge."), false);
                     return null;
                 });
+    }
+
+    // ---- Bridge call (chat) ----
+
+    private void sendChatToBridge(ServerPlayerEntity player, String message) {
+        HttpClient client = HttpClient.newHttpClient();
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("session_id", player.getUuidAsString());
+        payload.addProperty("message", message);
+        payload.addProperty("model", config.selectedModel);
+        payload.addProperty("player_name", player.getName().getString());
+        payload.addProperty("provider", config.selectedProvider);
+        payload.addProperty("api_key", config.apiKeys.getOrDefault(config.selectedProvider, ""));
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BRIDGE_BASE + "/chat"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
+                .build();
+
+        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(HttpResponse::body)
+                .thenAccept(response -> {
+                    if (response == null || response.isBlank()) return;
+                    LOGGER.info("AI chat raw response:\n{}", response);
+                    player.getEntityWorld().getServer().execute(() -> {
+                        try {
+                            processAiResponse(player, response, message, 0);
+                        } catch (Exception e) {
+                            player.sendMessage(Text.literal("§c[AI] Error: " + e.getMessage()), false);
+                        }
+                    });
+                })
+                .exceptionally(ex -> {
+                    player.sendMessage(Text.literal("§c[AI] Cannot reach bridge."), false);
+                    return null;
+                });
+    }
+
+    // ---- Build base payload ----
+
+    private JsonObject buildBasePayload(ServerPlayerEntity player, String prompt, String terrainData) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("session_id", player.getUuidAsString());
+        payload.addProperty("prompt", prompt);
+        payload.addProperty("terrain", terrainData);
+        payload.addProperty("player_x", player.getBlockX());
+        payload.addProperty("player_y", player.getBlockY());
+        payload.addProperty("player_z", player.getBlockZ());
+        payload.addProperty("model", config.selectedModel);
+        payload.addProperty("player_name", player.getName().getString());
+        payload.addProperty("provider", config.selectedProvider);
+        payload.addProperty("api_key", config.apiKeys.getOrDefault(config.selectedProvider, ""));
+        return payload;
+    }
+
+    // ---- Process AI response (with optional follow-up loop) ----
+
+    private void processAiResponse(ServerPlayerEntity player, String jsonResponse, String prompt, int depth) {
+        var result = AIActionExecutor.execute(player.getEntityWorld(), player, jsonResponse);
+
+        // Send AI chat message
+        if (result.chatMessage != null && !result.chatMessage.isEmpty()) {
+            player.sendMessage(Text.literal("§d[AI] " + result.chatMessage), false);
+        }
+
+        // Handle AI undo/redo requests
+        if (result.undoRequested) {
+            for (int i = 0; i < result.undoSteps && !undoStack.isEmpty(); i++) undo(player);
+        }
+        if (result.redoRequested) {
+            for (int i = 0; i < result.redoSteps && !redoStack.isEmpty(); i++) redo(player);
+        }
+
+        // If there are captured command outputs, send follow-up request
+        if (!result.capturedOutputs.isEmpty() && depth < 3) {
+            sendCapturedOutputsFollowUp(player, result.capturedOutputs, depth, result);
+            return;
+        }
+
+        // No more follow-ups — record build
+        finishBuild(player, result, prompt);
+    }
+
+    // ---- Follow-up: send captured outputs to bridge ----
+
+    private void sendCapturedOutputsFollowUp(ServerPlayerEntity player,
+                                              List<CommandCapture.CapturedOutput> outputs,
+                                              int depth,
+                                              AIActionExecutor.ActionResult previousResult) {
+        HttpClient client = HttpClient.newHttpClient();
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("session_id", player.getUuidAsString());
+        payload.addProperty("model", config.selectedModel);
+        payload.addProperty("player_name", player.getName().getString());
+        payload.addProperty("provider", config.selectedProvider);
+        payload.addProperty("api_key", config.apiKeys.getOrDefault(config.selectedProvider, ""));
+
+        JsonArray outputsArr = new JsonArray();
+        for (CommandCapture.CapturedOutput o : outputs) {
+            JsonObject obj = new JsonObject();
+            obj.addProperty("command", o.command);
+            obj.addProperty("output", o.output);
+            outputsArr.add(obj);
+        }
+        payload.add("command_outputs", outputsArr);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BRIDGE_BASE + "/command-result"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
+                .build();
+
+        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(HttpResponse::body)
+                .thenAccept(response -> {
+                    if (response == null || response.isBlank()) {
+                        player.getEntityWorld().getServer().execute(() ->
+                                finishBuild(player, previousResult, ""));
+                        return;
+                    }
+                    LOGGER.info("AI follow-up raw response:\n{}", response);
+                    player.getEntityWorld().getServer().execute(() -> {
+                        processAiResponse(player, response, "", depth + 1);
+                    });
+                })
+                .exceptionally(ex -> {
+                    player.sendMessage(Text.literal("§c[AI] Follow-up error: " + ex.getMessage()), false);
+                    player.getEntityWorld().getServer().execute(() ->
+                            finishBuild(player, previousResult, ""));
+                    return null;
+                });
+    }
+
+    // ---- Finish build (record history, show summary) ----
+
+    private void finishBuild(ServerPlayerEntity player, AIActionExecutor.ActionResult result, String prompt) {
+        result.record.prompt = prompt;
+        if (!result.record.changes.isEmpty() || result.record.commandsExecuted > 0
+                || result.record.signsPlaced > 0) {
+            undoStack.push(result.record);
+            redoStack.clear();
+            history.add(0, result.record);
+            if (history.size() > 100) history.remove(history.size() - 1);
+        }
+
+        if (!result.record.changes.isEmpty()) {
+            var summary = Text.literal("§a[AI] Done!");
+            String recSummary = result.record.summary();
+            if (!recSummary.isEmpty())
+                summary.append(Text.literal(" §7(" + recSummary + ")"));
+            player.sendMessage(summary, false);
+        }
+
+        if (!result.pendingConfirmations.isEmpty()) {
+            var batchId = java.util.UUID.randomUUID().toString().substring(0, 8);
+            var descBuilder = new StringBuilder("§e[AI] Confirm the following actions:\n");
+            for (var ca : result.pendingConfirmations) {
+                descBuilder.append(" §7• §f").append(ca.description).append("\n");
+            }
+            batchedConfirmations.put(batchId, new ArrayList<>(result.pendingConfirmations));
+            var txt = Text.literal(descBuilder.toString())
+                    .append(Text.literal("  §a[§lCONFIRM ALL§r§a]")
+                            .styled(s -> s.withClickEvent(
+                            new ClickEvent.RunCommand("/ai confirm " + batchId))
+                                    .withHoverEvent(new HoverEvent.ShowText(
+                                             Text.literal("Click to confirm all")))))
+                    .append(Text.literal("  "))
+                    .append(Text.literal("§c[§lDENY ALL§r§c]")
+                            .styled(s -> s.withClickEvent(
+                            new ClickEvent.RunCommand("/ai deny " + batchId))
+                                    .withHoverEvent(new HoverEvent.ShowText(
+                                             Text.literal("Click to deny all")))));
+            player.sendMessage(txt, false);
+        }
     }
 }

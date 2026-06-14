@@ -12,6 +12,9 @@
     "entrypoints": {
         "main": [
             "com.example.ai.AIBuilderMod"
+        ],
+        "client": [
+            "com.example.ai.client.AIBuilderModClient"
         ]
     },
     "mixins": [],
