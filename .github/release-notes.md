@@ -1,23 +1,22 @@
-## v0.1.0 — Initial Release
+## AI Builder Mod v1.0.0 — Minecraft 1.21.11
+
+This release ports the mod to **Minecraft 1.21.11 Fabric** and adds a custom mod icon.
+
+### What's Changed
+- **Minecraft 1.21.11** — updated all deps: Fabric Loom 1.14.10, Fabric API 0.141.4, Yarn mappings 1.21.11+build.6
+- **Fixed API breaks** — adapted to 1.21.11 API changes (`getEntityWorld`, `parseAndExecute`, `ClickEvent`/`HoverEvent` interface refactor)
+- **Mod icon** — added AI Builder icon
+- **Version range** — mod accepts `>=1.21.1` so it loads on 1.21.11 without issues
 
 ### Features
-- `/ai make <prompt>` — AI-powered building with terrain awareness
-- Multi-provider support: Ollama, OpenAI, Groq, xAI, Anthropic Claude, Google Gemini
-- Live model listing for each provider
-- API key entry via in-game chat
-- Command execution (give, enchant, gamerule, teleport, etc.)
-- Sign placement with AI-written text
-- Chest filling with items
-- Command block placement for minigames/automation
-- Shell command execution (with confirmation)
-- Chat-based CONFIRM/DENY for dangerous actions
-- Undo / Redo system with build history
-- AI-driven undo/redo
-- Smart batching: AI splits large builds into parts
-- Player-aware command targeting
+- `/ai make <prompt>` — AI-powered terrain-aware building
+- Multi-provider AI support: Ollama, OpenAI, Groq, xAI, Anthropic, Google
+- Undo/redo, build history, confirmation system for commands/shell
+- Python bridge (`python-bridge/bridge.py`) with live model listing
+- Block placement, signs, chests, command blocks, shell commands
+- AI-initiated undo/redo
 
-### Installation
-1. Download `ai-builder-mod-1.0.0.jar` and place in `.minecraft/mods/`
-2. Install Python deps: `pip install -r requirements.txt`
-3. Run bridge: `python3 bridge.py`
-4. Launch Minecraft with Fabric 1.21.1
+### Assets
+- `ai-builder-mod-*.jar` — the Fabric mod
+- `bridge.py` — Python AI bridge (run alongside the mod)
+- `requirements.txt` — Python dependencies

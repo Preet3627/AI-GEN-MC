@@ -54,7 +54,7 @@ public class AIBuilderMod implements ModInitializer {
                             if (player == null) return 0;
                             String prompt = StringArgumentType.getString(context, "prompt");
                             player.sendMessage(Text.literal("§b[AI] Scanning terrain..."), false);
-                            String terrain = TerrainScanner.scanArea(player.getServerWorld(), player.getBlockPos(), 15);
+                            String terrain = TerrainScanner.scanArea(player.getEntityWorld(), player.getBlockPos(), 15);
                             player.sendMessage(Text.literal("§b[AI] " + player.getName().getString()
                                     + " asked: " + prompt), false);
                             sendToBridge(player, prompt, terrain);
@@ -185,7 +185,7 @@ public class AIBuilderMod implements ModInitializer {
         var changes = record.changes;
         for (int i = changes.size() - 1; i >= 0; i--) {
             var c = changes.get(i);
-            player.getServerWorld().setBlockState(c.pos, c.oldState, Block.NOTIFY_ALL);
+            player.getEntityWorld().setBlockState(c.pos, c.oldState, Block.NOTIFY_ALL);
         }
         redoStack.push(record);
         player.sendMessage(Text.literal("§e[AI] Undo: " + record.summary()), false);
@@ -198,7 +198,7 @@ public class AIBuilderMod implements ModInitializer {
         }
         AIActionExecutor.BuildRecord record = redoStack.pop();
         for (var c : record.changes) {
-            player.getServerWorld().setBlockState(c.pos, c.newState, Block.NOTIFY_ALL);
+            player.getEntityWorld().setBlockState(c.pos, c.newState, Block.NOTIFY_ALL);
         }
         undoStack.push(record);
         player.sendMessage(Text.literal("§e[AI] Redo: " + record.summary()), false);
@@ -233,7 +233,7 @@ public class AIBuilderMod implements ModInitializer {
 
         client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(HttpResponse::body)
-                .thenAccept(response -> player.getServer().execute(() -> {
+                .thenAccept(response -> player.getEntityWorld().getServer().execute(() -> {
                     try {
                         JsonArray models = GSON.fromJson(response, JsonArray.class);
                         player.sendMessage(Text.literal("§b[AI] Models (" + selectedProvider + "):"), false);
@@ -274,11 +274,11 @@ public class AIBuilderMod implements ModInitializer {
         switch (action.type) {
             case "command" -> {
                 String cmd = action.command.startsWith("/") ? action.command.substring(1) : action.command;
-                player.getServer().getCommandManager().executeWithPrefix(
-                        player.getServer().getCommandSource(), cmd);
+                player.getEntityWorld().getServer().getCommandManager().parseAndExecute(
+                        player.getEntityWorld().getServer().getCommandSource(), cmd);
                 player.sendMessage(Text.literal("§a[AI] Executed: " + action.command), false);
             }
-            case "shell" -> player.getServer().execute(() -> {
+            case "shell" -> player.getEntityWorld().getServer().execute(() -> {
                 String output = AIActionExecutor.executeShell(action.command);
                 player.sendMessage(Text.literal("§a[AI] Shell output:\n§7" + output), false);
             });
@@ -336,9 +336,9 @@ public class AIBuilderMod implements ModInitializer {
                 .thenApply(HttpResponse::body)
                 .thenAccept(response -> {
                     if (response == null || response.isBlank()) return;
-                    player.getServer().execute(() -> {
+                    player.getEntityWorld().getServer().execute(() -> {
                         try {
-                            var result = AIActionExecutor.execute(player.getServerWorld(), player, response);
+                            var result = AIActionExecutor.execute(player.getEntityWorld(), player, response);
 
                             // Handle AI undo/redo requests
                             if (result.undoRequested) {
@@ -371,15 +371,15 @@ public class AIBuilderMod implements ModInitializer {
                                 var txt = Text.literal("§e[AI] " + ca.description + "\n")
                                         .append(Text.literal("  §a[§lCONFIRM§r§a]")
                                                 .styled(s -> s.withClickEvent(
-                                                        new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/ai confirm " + ca.id))
-                                                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                                                Text.literal("Click to confirm")))))
+                                                new ClickEvent.RunCommand("/ai confirm " + ca.id))
+                                                        .withHoverEvent(new HoverEvent.ShowText(
+                                                                 Text.literal("Click to confirm")))))
                                         .append(Text.literal("  "))
                                         .append(Text.literal("§c[§lDENY§r§c]")
                                                 .styled(s -> s.withClickEvent(
-                                                        new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/ai deny " + ca.id))
-                                                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                                                Text.literal("Click to deny")))));
+                                                new ClickEvent.RunCommand("/ai deny " + ca.id))
+                                                        .withHoverEvent(new HoverEvent.ShowText(
+                                                                 Text.literal("Click to deny")))));
                                 player.sendMessage(txt, false);
                             }
                         } catch (Exception e) {

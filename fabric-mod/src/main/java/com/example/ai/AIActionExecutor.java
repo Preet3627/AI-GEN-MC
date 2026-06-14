@@ -218,7 +218,7 @@ public class AIActionExecutor {
         var server = world.getServer();
         if (server == null) return;
         String cmd = command.startsWith("/") ? command.substring(1) : command;
-        server.getCommandManager().executeWithPrefix(server.getCommandSource(), cmd);
+        server.getCommandManager().parseAndExecute(server.getCommandSource(), cmd);
     }
 
     private static boolean placeSign(ServerWorld world, int x, int y, int z, String[] lines) {

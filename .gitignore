@@ -27,4 +27,3 @@ Thumbs.db
 # Env
 .env
 *.key
-.github/workflows/
