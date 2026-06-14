@@ -1,0 +1,7 @@
+{
+  "prompt": "create a PVP arena with command blocks that teleport players back to spawn when they die",
+  "terrain": "[{\"rel_x\": 0, \"rel_y\": -1, \"rel_z\": 0, \"id\": \"minecraft:grass_block\"}, {\"rel_x\": 1, \"rel_y\": -1, \"rel_z\": 0, \"id\": \"minecraft:grass_block\"}, {\"rel_x\": -1, \"rel_y\": -1, \"rel_z\": 0, \"id\": \"minecraft:grass_block\"}, {\"rel_x\": 2, \"rel_y\": -1, \"rel_z\": 0, \"id\": \"minecraft:grass_block\"}, {\"rel_x\": -2, \"rel_y\": -1, \"rel_z\": 0, \"id\": \"minecraft:grass_block\"}, {\"rel_x\": 0, \"rel_y\": -1, \"rel_z\": 1, \"id\": \"minecraft:grass_block\"}, {\"rel_x\": 0, \"rel_y\": -1, \"rel_z\": -1, \"id\": \"minecraft:grass_block\"}]",
+  "player_x": 0, "player_y": 64, "player_z": 0,
+  "model": "gpt-oss:120b-cloud",
+  "player_name": "Steve"
+}
