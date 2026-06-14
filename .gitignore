@@ -1,9 +1,6 @@
 # Gradle
 fabric-mod/.gradle/
 fabric-mod/build/
-fabric-mod/gradle/wrapper/gradle-wrapper.jar
-fabric-mod/gradlew
-fabric-mod/gradlew.bat
 
 # Python
 __pycache__/
