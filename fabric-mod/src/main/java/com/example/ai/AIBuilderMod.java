@@ -68,15 +68,25 @@ public class AIBuilderMod implements ModInitializer {
                             return 1;
                         })));
 
-        aiCmd.then(CommandManager.literal("chat")
-                .then(CommandManager.argument("message", StringArgumentType.greedyString())
-                        .executes(context -> {
-                            ServerPlayerEntity player = context.getSource().getPlayer();
-                            if (player == null) return 0;
-                            String message = StringArgumentType.getString(context, "message");
-                            sendChatToBridge(player, message);
-                            return 1;
-                        })));
+        var chatCmd = CommandManager.literal("chat");
+        chatCmd.then(CommandManager.literal("toggle")
+                .executes(context -> {
+                    ServerPlayerEntity player = context.getSource().getPlayer();
+                    if (player == null) return 0;
+                    config.chatEnabled = !config.chatEnabled;
+                    config.save();
+                    player.sendMessage(Text.literal("§a[AI] Chat responses " + (config.chatEnabled ? "enabled" : "disabled")), false);
+                    return 1;
+                }));
+        chatCmd.then(CommandManager.argument("message", StringArgumentType.greedyString())
+                .executes(context -> {
+                    ServerPlayerEntity player = context.getSource().getPlayer();
+                    if (player == null) return 0;
+                    String message = StringArgumentType.getString(context, "message");
+                    sendChatToBridge(player, message);
+                    return 1;
+                }));
+        aiCmd.then(chatCmd);
 
         aiCmd.then(CommandManager.literal("provider")
                 .then(CommandManager.argument("name", StringArgumentType.word())
@@ -346,6 +356,7 @@ public class AIBuilderMod implements ModInitializer {
         player.sendMessage(Text.literal("§b===== AI Builder Mod Commands ====="), false);
         player.sendMessage(Text.literal("§e/ai make <prompt> §7- Build or do anything"), false);
         player.sendMessage(Text.literal("§e/ai chat <message> §7- Chat with AI (has memory)"), false);
+        player.sendMessage(Text.literal("§e/ai chat toggle §7- Toggle AI chat responses on/off"), false);
         player.sendMessage(Text.literal("§e/ai provider <name> §7- Switch provider"), false);
         player.sendMessage(Text.literal("§e/ai key <provider> <key> §7- Set API key"), false);
         player.sendMessage(Text.literal("§e/ai model <name> §7- Select AI model"), false);
@@ -356,6 +367,7 @@ public class AIBuilderMod implements ModInitializer {
         player.sendMessage(Text.literal("§e/ai confirm <id> §7- Confirm pending action"), false);
         player.sendMessage(Text.literal("§e/ai deny <id> §7- Deny pending action"), false);
         player.sendMessage(Text.literal("§7Provider: §f" + config.selectedProvider + " §7| Model: §f" + (config.selectedModel.isEmpty() ? "default" : config.selectedModel)), false);
+        player.sendMessage(Text.literal("§7Chat responses: §" + (config.chatEnabled ? "aON" : "cOFF")), false);
     }
 
     // ---- Bridge call (make) ----
@@ -450,8 +462,8 @@ public class AIBuilderMod implements ModInitializer {
     private void processAiResponse(ServerPlayerEntity player, String jsonResponse, String prompt, int depth) {
         var result = AIActionExecutor.execute(player.getEntityWorld(), player, jsonResponse);
 
-        // Send AI chat message
-        if (result.chatMessage != null && !result.chatMessage.isEmpty()) {
+        // Send AI chat message (only if player has chat responses enabled)
+        if (result.chatMessage != null && !result.chatMessage.isEmpty() && config.chatEnabled) {
             player.sendMessage(Text.literal("§d[AI] " + result.chatMessage), false);
         }
 

@@ -20,6 +20,7 @@ public class ModConfig {
     public String selectedProvider = "ollama";
     public String selectedModel = "";
     public Map<String, String> apiKeys = new HashMap<>();
+    public boolean chatEnabled = true;
 
     public static ModConfig load() {
         if (Files.exists(CONFIG_PATH)) {

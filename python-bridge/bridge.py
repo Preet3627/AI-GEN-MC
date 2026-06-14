@@ -17,6 +17,8 @@ from typing import Optional
 
 from aiohttp import web
 
+from templates import TEMPLATES
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-bridge")
 
@@ -94,6 +96,11 @@ def _add_message(session_id: str, role: str, content: str):
 # -------------------------------------------------------------------
 # System prompt
 # -------------------------------------------------------------------
+_TEMPLATE_LIST = "\n".join(
+    f'  - "{name}": {t["description"]} ({t["dimensions"]}, ~{t["block_count"]})'
+    for name, t in TEMPLATES.items()
+)
+
 SYSTEM_PROMPT = (
     "You are a Minecraft AI assistant inside the game. You help players build structures, "
     "run commands, change game modes, give items, and chat conversationally.\n\n"
@@ -163,6 +170,13 @@ SYSTEM_PROMPT = (
     '    {"cmd": "/item replace entity @p weapon.offhand with minecraft:wind_charge 64", "confirm": true, "desc": "Wind charges in off-hand"},\n'
     '    {"cmd": "/give @p minecraft:enchanted_golden_apple 8", "confirm": true, "desc": "Give food"}]\n'
     "}\n\n"
+    f"=== AVAILABLE BUILD TEMPLATES ===\n"
+    f"You have pre-defined build templates available. When the player asks for a specific "
+    f"structure, check if it matches one of these templates by name. If so, use the template "
+    f"instructions to build it block-by-block.\n\n"
+    f"Available templates:\n{_TEMPLATE_LIST}\n\n"
+    f"If the player asks for a structure that matches a template, check its instructions "
+    f"and build it.\n\n"
     "=== BUILDING GUIDELINES ===\n"
     "- For walls: place blocks in a rectangle, 3-4 blocks high\n"
     "- For roofs: use slabs or stairs on top of walls\n"
@@ -561,6 +575,10 @@ async def command_result_handler(request: web.Request) -> web.Response:
         return web.json_response({"chat": f"Follow-up error: {str(e)}"})
 
 
+async def list_templates_handler(_request: web.Request) -> web.Response:
+    return web.json_response(TEMPLATES)
+
+
 async def list_models_handler(request: web.Request) -> web.Response:
     provider = request.query.get("provider", DEFAULT_PROVIDER)
     api_key = request.query.get("api_key", "")
@@ -598,6 +616,7 @@ def main():
     app.router.add_post("/chat", chat_handler)
     app.router.add_post("/command-result", command_result_handler)
     app.router.add_get("/list-models", list_models_handler)
+    app.router.add_get("/list-templates", list_templates_handler)
     app.router.add_get("/health", health)
 
     logger.info("AI Bridge v0.2.0 — port %d | default provider=%s model=%s",
