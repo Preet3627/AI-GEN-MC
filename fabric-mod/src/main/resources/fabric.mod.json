@@ -1,0 +1,23 @@
+{
+    "schemaVersion": 1,
+    "id": "ai-builder-mod",
+    "version": "${version}",
+    "name": "AI Builder Mod",
+    "description": "Terrain-aware AI building mod powered by Ollama",
+    "authors": [],
+    "contact": {},
+    "license": "MIT",
+    "icon": "assets/ai-builder-mod/icon.png",
+    "environment": "*",
+    "entrypoints": {
+        "main": [
+            "com.example.ai.AIBuilderMod"
+        ]
+    },
+    "mixins": [],
+    "depends": {
+        "fabricloader": ">=${loader_version}",
+        "fabric-api": "*",
+        "minecraft": "${minecraft_version}"
+    }
+}

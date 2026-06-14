@@ -1,0 +1,29 @@
+# Gradle
+fabric-mod/.gradle/
+fabric-mod/build/
+fabric-mod/gradle/wrapper/gradle-wrapper.jar
+fabric-mod/gradlew
+fabric-mod/gradlew.bat
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+*.key
