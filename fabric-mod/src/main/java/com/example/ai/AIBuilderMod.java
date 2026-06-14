@@ -186,7 +186,7 @@ public class AIBuilderMod implements ModInitializer {
                 .executes(context -> {
                     ServerPlayerEntity player = context.getSource().getPlayer();
                     if (player == null) return 0;
-                    player.sendMessage(Text.literal("§e[AI] Use /ai provider <name>, /ai model <name>, and /ai key <provider> <key> to configure."), false);
+                    player.sendMessage(Text.literal("§e[AI] Press §aK §eor use §a/ai gui §efrom chat to open the config screen."), false);
                     return 1;
                 }));
 
@@ -366,6 +366,7 @@ public class AIBuilderMod implements ModInitializer {
         player.sendMessage(Text.literal("§e/ai history §7- Show build history"), false);
         player.sendMessage(Text.literal("§e/ai confirm <id> §7- Confirm pending action"), false);
         player.sendMessage(Text.literal("§e/ai deny <id> §7- Deny pending action"), false);
+        player.sendMessage(Text.literal("§e/ai gui §7- Open config GUI (or press K)"), false);
         player.sendMessage(Text.literal("§7Provider: §f" + config.selectedProvider + " §7| Model: §f" + (config.selectedModel.isEmpty() ? "default" : config.selectedModel)), false);
         player.sendMessage(Text.literal("§7Chat responses: §" + (config.chatEnabled ? "aON" : "cOFF")), false);
     }
