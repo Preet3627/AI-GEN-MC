@@ -96,6 +96,7 @@ public class AIActionExecutor {
         if (!root.isJsonObject()) return result;
         JsonObject obj = root.getAsJsonObject();
 
+        // Chat message
         if (obj.has("chat")) {
             result.chatMessage = obj.get("chat").getAsString();
         }
@@ -112,7 +113,7 @@ public class AIActionExecutor {
         }
 
         if (obj.has("blocks"))
-            recordBlockChanges(world, obj.getAsJsonArray("blocks"), playr, result);
+            recordBlockChanges(world, obj.getAsJsonArray("blocks"), player, result);
 
         if (obj.has("commands")) {
             for (JsonElement e : obj.getAsJsonArray("commands")) {

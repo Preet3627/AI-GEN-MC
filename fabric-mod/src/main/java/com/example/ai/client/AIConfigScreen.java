@@ -27,6 +27,7 @@ public class AIConfigScreen extends Screen {
         int cx = width / 2;
         int y = 35;
 
+        // === SECTION: Provider ===
         drawSectionHeader(y, "§6§lPROVIDER");
         y += 14;
 
@@ -54,6 +55,7 @@ public class AIConfigScreen extends Screen {
                 btn -> {}
         ).dimensions(cx - 110, y, 220, 12).build());
 
+        // === SECTION: Model ===
         y += 24;
         drawSectionHeader(y, "§b§lMODEL");
         y += 14;
@@ -73,6 +75,7 @@ public class AIConfigScreen extends Screen {
                 }
         ).dimensions(cx - 110, y, 220, 20).build());
 
+        // === SECTION: API Key ===
         y += 28;
         drawSectionHeader(y, "§e§lAPI KEY");
         y += 14;
@@ -104,6 +107,7 @@ public class AIConfigScreen extends Screen {
                 }
         ).dimensions(cx - 110, y, 220, 20).build());
 
+        // === SECTION: Chat Responses ===
         y += 28;
         drawSectionHeader(y, "§d§lCHAT RESPONSES");
         y += 14;
@@ -119,6 +123,7 @@ public class AIConfigScreen extends Screen {
         ).dimensions(cx - 110, y, 220, 20).build();
         addDrawableChild(chatToggleBtn);
 
+        // === Done button ===
         y += 30;
         addDrawableChild(ButtonWidget.builder(
                 Text.literal("§lDONE"),
@@ -132,6 +137,7 @@ public class AIConfigScreen extends Screen {
     }
 
     private void drawSectionHeader(int y, String text) {
+        // Background bar
         int cx = width / 2;
         addDrawableChild(ButtonWidget.builder(
                 Text.literal(""),
@@ -163,8 +169,10 @@ public class AIConfigScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
         int cx = width / 2;
 
+        // Title bar
         context.drawCenteredTextWithShadow(textRenderer, Text.literal("§l§nAI Builder Mod Config"), cx, 12, 0xffaa00);
 
+        // Section labels (draw directly because ButtonWidget labels are limited)
         context.drawTextWithShadow(textRenderer, Text.literal("§6§lPROVIDER"), cx - 110, 35, 0xffffff);
 
         String prov = AIBuilderMod.getConfig().selectedProvider;
@@ -174,6 +182,7 @@ public class AIConfigScreen extends Screen {
         context.drawTextWithShadow(textRenderer, Text.literal("§e§lAPI KEY"), cx - 110, 143, 0xffffff);
         context.drawTextWithShadow(textRenderer, Text.literal("§d§lCHAT RESPONSES"), cx - 110, 196, 0xffffff);
 
+        // Status message
         if (!status.isEmpty()) {
             context.drawCenteredTextWithShadow(textRenderer, Text.literal(status), cx, height - 30, 0xaaaaaa);
             if (--statusTimer <= 0) status = "";
